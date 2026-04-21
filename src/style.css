@@ -2,8 +2,9 @@
   color-scheme: dark;
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
   --bg: #09141d;
-  --panel: rgba(12, 21, 31, 0.88);
-  --panel-border: rgba(173, 214, 255, 0.18);
+  --panel: rgba(7, 18, 27, 0.78);
+  --panel-strong: rgba(10, 22, 33, 0.92);
+  --panel-border: rgba(173, 214, 255, 0.14);
   --text: #f3f7fb;
   --muted: #9bb5ca;
   --accent: #59d8ff;
@@ -25,20 +26,23 @@ body,
 body {
   color: var(--text);
   background:
-    radial-gradient(circle at top, rgba(35, 109, 173, 0.35), transparent 42%),
-    linear-gradient(135deg, #081119 0%, #112433 50%, #03070a 100%);
+    radial-gradient(circle at top left, rgba(48, 133, 201, 0.28), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(69, 227, 167, 0.12), transparent 22%),
+    linear-gradient(135deg, #051018 0%, #0a1822 48%, #03070a 100%);
 }
 
 #app {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 340px minmax(0, 1fr);
 }
 
 .hud-panel {
-  padding: 28px;
+  padding: 28px 24px;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: linear-gradient(180deg, rgba(5, 12, 18, 0.94), rgba(8, 18, 29, 0.84));
-  backdrop-filter: blur(16px);
+  background:
+    linear-gradient(180deg, rgba(4, 11, 17, 0.94), rgba(8, 18, 29, 0.88)),
+    radial-gradient(circle at top, rgba(89, 216, 255, 0.12), transparent 35%);
+  backdrop-filter: blur(18px);
 }
 
 .eyebrow {
@@ -70,9 +74,11 @@ h1 {
   margin-bottom: 16px;
   padding: 16px 18px;
   border: 1px solid var(--panel-border);
-  border-radius: 18px;
+  border-radius: 20px;
   background: var(--panel);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 40px rgba(0, 0, 0, 0.24);
 }
 
 .card h2 {
@@ -92,6 +98,40 @@ h1 {
   font-family: "Cascadia Code", "Consolas", monospace;
 }
 
+.hero-card {
+  background:
+    linear-gradient(160deg, rgba(10, 28, 40, 0.92), rgba(10, 18, 29, 0.76)),
+    radial-gradient(circle at top left, rgba(161, 255, 111, 0.08), transparent 42%);
+}
+
+.stat-card {
+  background: var(--panel-strong);
+}
+
+.meter-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.health-meter {
+  overflow: hidden;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#health-fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #4ee9aa 0%, #8effca 100%);
+  box-shadow: 0 0 18px rgba(110, 245, 187, 0.32);
+}
+
 .status-card p {
   color: var(--accent-strong);
 }
@@ -108,6 +148,18 @@ kbd {
 .viewport-shell {
   position: relative;
   min-height: 100vh;
+  overflow: hidden;
+}
+
+.viewport-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.05), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.18)),
+    radial-gradient(circle at center, transparent 55%, rgba(0, 0, 0, 0.28));
+  z-index: 1;
 }
 
 #viewport {

@@ -15,28 +15,31 @@
         <p class="eyebrow">TNM Project Prototype</p>
         <h1>Tank Arena</h1>
         <p class="subtitle">
-          Top-down tank combat built around the local GLB assets in <code>/3d</code>.
+          Procedural top-down combat with a fixed camera, pathfinding enemies, and local GLB assets.
         </p>
 
-        <div class="card">
+        <div class="card hero-card">
           <h2>Controls</h2>
-          <p><kbd>WASD</kbd> move the tank hull</p>
-          <p>Mouse aims the turret</p>
-          <p><kbd>Click</kbd> or <kbd>Space</kbd> fire</p>
+          <p><kbd>WASD</kbd> move on screen axes</p>
+          <p>Mouse aims turret</p>
+          <p><kbd>Click</kbd> or <kbd>Space</kbd> fires</p>
         </div>
 
-        <div class="card">
-          <h2>Arena</h2>
-          <p>Tank model: <code>mother_3_-_pork_tank.glb</code></p>
-          <p>Cover props: shipping containers and cardboard boxes</p>
-          <p>Pickup: animated spell glyph</p>
+        <div class="card stat-card">
+          <div class="meter-label">
+            <span id="health">Health 100</span>
+            <span id="objective">Objective</span>
+          </div>
+          <div class="health-meter">
+            <div id="health-fill"></div>
+          </div>
         </div>
 
         <div class="card">
           <h2>Match</h2>
-          <p id="health">Health: 100</p>
-          <p id="score">Score: 0</p>
-          <p id="enemies">Enemies: 0</p>
+          <p id="score">Score 0</p>
+          <p id="enemies">Enemies 0</p>
+          <p>Map is generated fresh on each reload.</p>
         </div>
 
         <div class="card status-card">
