@@ -1,0 +1,10 @@
+export const GRID_SIZE = 23;
+export const CELL_SIZE = 4.5;
+export const HALF_GRID = (GRID_SIZE - 1) / 2;
+export const MAP_HALF = HALF_GRID * CELL_SIZE;
+export const CAMERA_HEIGHT = 42;
+export const CAMERA_HALF_HEIGHT = 17;
+export const PLAYER_MAX_SPEED = 9;
+export const ENEMY_MAX_SPEED = 6;
+export const SHELL_SPEED = 22;
+export const PICKUP_RESPAWN_TIME = 8;

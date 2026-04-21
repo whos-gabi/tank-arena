@@ -11,46 +11,49 @@
   </head>
   <body>
     <div id="app">
-      <aside class="hud-panel">
-        <p class="eyebrow">TNM Project Prototype</p>
-        <h1>Tank Arena</h1>
-        <p class="subtitle">
-          Procedural top-down combat with a fixed camera, pathfinding enemies, and local GLB assets.
-        </p>
+      <div id="viewport"></div>
 
-        <div class="card hero-card">
-          <h2>Controls</h2>
-          <p><kbd>WASD</kbd> move on screen axes</p>
-          <p>Mouse aims turret</p>
-          <p><kbd>Click</kbd> or <kbd>Space</kbd> fires</p>
+      <div id="intro-overlay" class="intro-overlay">
+        <div class="intro-card">
+          <p class="intro-kicker">Top-Down Combat</p>
+          <h1>Tank Arena</h1>
+          <p class="intro-controls">WASD move</p>
+          <p class="intro-controls">Mouse aim</p>
+          <p class="intro-controls">Click / Space fire</p>
         </div>
+      </div>
 
-        <div class="card stat-card">
-          <div class="meter-label">
-            <span id="health">Health 100</span>
-            <span id="objective">Objective</span>
+      <div id="game-hud" class="game-hud">
+        <div class="hud-top">
+          <div class="hud-panel left">
+            <div class="hud-row">
+              <span id="health">Hull 100</span>
+              <span id="objective">Hold position</span>
+            </div>
+            <div class="health-meter">
+              <div id="health-fill"></div>
+            </div>
           </div>
-          <div class="health-meter">
-            <div id="health-fill"></div>
+
+          <div class="hud-panel right">
+            <span id="score">Score 0</span>
+            <span id="enemies">Enemies 0</span>
           </div>
         </div>
 
-        <div class="card">
-          <h2>Match</h2>
-          <p id="score">Score 0</p>
-          <p id="enemies">Enemies 0</p>
-          <p>Map is generated fresh on each reload.</p>
+        <div class="hud-bottom">
+          <p id="status">Loading...</p>
         </div>
+      </div>
 
-        <div class="card status-card">
-          <h2>Status</h2>
-          <p id="status">Initializing arena...</p>
+      <div id="lose-screen" class="lose-screen">
+        <div class="lose-card">
+          <p class="lose-kicker">Match Over</p>
+          <h2>You Lost</h2>
+          <p>Reset the arena and go again.</p>
+          <button id="retry-button" type="button">Retry</button>
         </div>
-      </aside>
-
-      <main class="viewport-shell">
-        <div id="viewport"></div>
-      </main>
+      </div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>
