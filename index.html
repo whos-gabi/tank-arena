@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Tank Arena boilerplate for New Media Technologies using TypeScript and Three.js."
+    />
+    <title>Tank Arena</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside class="hud-panel">
+        <p class="eyebrow">TNM Project Prototype</p>
+        <h1>Tank Arena</h1>
+        <p class="subtitle">
+          Top-down tank combat built around the local GLB assets in <code>/3d</code>.
+        </p>
+
+        <div class="card">
+          <h2>Controls</h2>
+          <p><kbd>WASD</kbd> move the tank hull</p>
+          <p>Mouse aims the turret</p>
+          <p><kbd>Click</kbd> or <kbd>Space</kbd> fire</p>
+        </div>
+
+        <div class="card">
+          <h2>Arena</h2>
+          <p>Tank model: <code>mother_3_-_pork_tank.glb</code></p>
+          <p>Cover props: shipping containers and cardboard boxes</p>
+          <p>Pickup: animated spell glyph</p>
+        </div>
+
+        <div class="card">
+          <h2>Match</h2>
+          <p id="health">Health: 100</p>
+          <p id="score">Score: 0</p>
+          <p id="enemies">Enemies: 0</p>
+        </div>
+
+        <div class="card status-card">
+          <h2>Status</h2>
+          <p id="status">Initializing arena...</p>
+        </div>
+      </aside>
+
+      <main class="viewport-shell">
+        <div id="viewport"></div>
+      </main>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+  </html>
