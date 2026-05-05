@@ -69,7 +69,6 @@ body {
 .lose-screen {
   display: grid;
   place-items: center;
-  pointer-events: none;
   transition: opacity 420ms ease, visibility 420ms ease, transform 420ms ease;
 }
 
@@ -99,6 +98,7 @@ body {
     0 28px 80px rgba(0, 0, 0, 0.34);
   text-align: center;
   backdrop-filter: blur(18px);
+  pointer-events: auto;
 }
 
 .intro-kicker,
@@ -122,6 +122,62 @@ body {
   margin: 8px 0;
   color: var(--muted);
   font-size: 1rem;
+}
+
+.camera-mode-selector {
+  margin: 24px 0 16px;
+  text-align: center;
+}
+
+.mode-label {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.mode-button {
+  margin: 0 6px;
+  padding: 10px 20px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: rgba(8, 18, 27, 0.6);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-button:hover {
+  background: rgba(8, 18, 27, 0.8);
+  border-color: var(--accent);
+}
+
+.mode-button.active {
+  background: linear-gradient(135deg, #5edcff 0%, #87ffc9 100%);
+  color: #041017;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.start-button {
+  margin-top: 20px;
+  padding: 14px 32px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #5edcff 0%, #87ffc9 100%);
+  color: #041017;
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 14px 30px rgba(76, 211, 255, 0.24);
+  transition: all 0.2s;
+}
+
+.start-button:hover {
+  filter: brightness(1.1);
+  transform: translateY(-2px);
 }
 
 .game-hud {
@@ -225,13 +281,20 @@ body {
     radial-gradient(circle at center, rgba(255, 107, 92, 0.1), transparent 36%);
 }
 
+#win-screen {
+  background:
+    linear-gradient(180deg, rgba(2, 6, 10, 0.58), rgba(2, 6, 10, 0.86)),
+    radial-gradient(circle at center, rgba(140, 255, 200, 0.12), transparent 36%);
+}
+
 .lose-screen.visible {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 
-#retry-button {
+#retry-button,
+#win-retry-button {
   margin-top: 18px;
   padding: 12px 22px;
   border: 0;
@@ -244,8 +307,16 @@ body {
   box-shadow: 0 14px 30px rgba(76, 211, 255, 0.24);
 }
 
-#retry-button:hover {
+#retry-button:hover,
+#win-retry-button:hover {
   filter: brightness(1.04);
+}
+
+#confetti-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
 }
 
 @media (max-width: 860px) {

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
   CAMERA_HALF_HEIGHT,
   CAMERA_HEIGHT,
@@ -6,6 +7,7 @@ import {
   MAP_HALF,
   PICKUP_RESPAWN_TIME,
   PLAYER_MAX_SPEED,
+  ROBOT_MAX_SPEED,
   SHELL_SPEED,
 } from "./config";
 import { Assets, loadAssets } from "./assets";
@@ -14,8 +16,9 @@ import { cellFromWorld, GridCell, keyOf, worldFromCell } from "./grid";
 import { HUD } from "./hud";
 import { angleLerp, approachVector, circleIntersectsBox, forwardFromHeading } from "./math";
 import { findPath } from "./pathfinding";
+import { DestructionEffects } from "./DestructionEffects";
 
-type Team = "player" | "enemy";
+type Team = "player" | "enemy" | "robot";
 
 type Projectile = {
   mesh: THREE.Mesh;
@@ -29,12 +32,8 @@ type TankActor = {
   team: Team;
   root: THREE.Group;
   visual: THREE.Group;
-  hull: THREE.Object3D;
-  turret: THREE.Object3D;
-  hullBaseQuaternion: THREE.Quaternion;
-  turretBaseQuaternion: THREE.Quaternion;
   bodyHeading: number;
-  turretHeading: number;
+  aimHeading: number;
   velocity: THREE.Vector3;
   maxSpeed: number;
   fireCooldown: number;
@@ -45,6 +44,7 @@ type TankActor = {
   repathTimer: number;
   lastTargetCell: string;
   strafeDirection: number;
+  mixer?: THREE.AnimationMixer;
 };
 
 class AudioBridge {
@@ -98,7 +98,7 @@ export class Game {
   private readonly viewport: HTMLDivElement;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.OrthographicCamera(
+  private readonly orthoCam = new THREE.OrthographicCamera(
     -CAMERA_HALF_HEIGHT,
     CAMERA_HALF_HEIGHT,
     CAMERA_HALF_HEIGHT,
@@ -106,6 +106,13 @@ export class Game {
     0.1,
     200,
   );
+  private readonly perspCam = new THREE.PerspectiveCamera(
+    60,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    200,
+  );
+  private camera!: THREE.Camera;
   private readonly raycaster = new THREE.Raycaster();
   private readonly aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly pointerNdc = new THREE.Vector2(0, 0);
@@ -116,7 +123,7 @@ export class Game {
   private readonly projectiles: Projectile[] = [];
   private readonly obstacles: Obstacle[] = [];
   private readonly enemyTanks: TankActor[] = [];
-  private readonly pickupAnchor = new THREE.Group();
+  private readonly pickupAnchors: THREE.Group[] = [];
   private readonly reticle = new THREE.Mesh(
     new THREE.RingGeometry(0.38, 0.54, 28),
     new THREE.MeshBasicMaterial({ color: "#6de8ff", transparent: true, opacity: 0.92 }),
@@ -131,11 +138,15 @@ export class Game {
   private blockedGrid: boolean[][] = [];
   private walkableCells: GridCell[] = [];
   private playerTank!: TankActor;
+  private destructionEffects!: DestructionEffects;
   private score = 0;
   private pickupCooldown = 0;
   private pickupActive = false;
   private fireQueued = false;
   private matchRunning = false;
+  private cameraMode: "topdown" | "thirdperson" = "topdown";
+  private gameStarted = false;
+  private cameraAngle: number | undefined;
 
   constructor(viewport: HTMLDivElement) {
     this.viewport = viewport;
@@ -153,13 +164,15 @@ export class Game {
     this.scene.background = new THREE.Color("#071118");
     this.scene.fog = new THREE.Fog("#071118", 50, 110);
 
-    this.camera.up.set(0, 0, -1);
+    this.camera = this.orthoCam;
+    this.orthoCam.up.set(0, 0, -1);
     this.reticle.rotation.x = -Math.PI / 2;
     this.reticle.position.y = 0.08;
 
     this.scene.add(this.worldRoot);
     this.scene.add(this.reticle);
-    this.scene.add(this.pickupAnchor);
+    this.scene.add(this.orthoCam);
+    this.scene.add(this.perspCam);
 
     this.createLights();
     this.bindEvents();
@@ -169,7 +182,15 @@ export class Game {
     this.hud.startIntro();
     this.hud.setStatus("Loading assets...");
     this.assets = await loadAssets((message) => this.hud.setStatus(message));
-    await this.restartMatch();
+
+    this.hud.onStart((mode) => {
+      this.cameraMode = mode;
+      this.camera = mode === "topdown" ? this.orthoCam : this.perspCam;
+      this.gameStarted = true;
+      this.hud.skipIntro();
+      void this.restartMatch();
+    });
+
     this.animate();
   }
 
@@ -178,18 +199,17 @@ export class Game {
       const rect = this.renderer.domElement.getBoundingClientRect();
       this.pointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       this.pointerNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      this.hud.skipIntro();
     });
 
     this.renderer.domElement.addEventListener("pointerdown", () => {
+      if (!this.gameStarted) return;
       this.fireQueued = true;
       this.audio.resume();
-      this.hud.skipIntro();
     });
 
     window.addEventListener("keydown", (event) => {
+      if (!this.gameStarted) return;
       this.pressed.add(event.code);
-      this.hud.skipIntro();
       if (event.code === "Space") {
         this.fireQueued = true;
         event.preventDefault();
@@ -206,24 +226,30 @@ export class Game {
   }
 
   private createLights() {
-    this.scene.add(new THREE.AmbientLight("#a9d8ff", 1.5));
+    this.scene.add(new THREE.AmbientLight("#a9d8ff", 1.8));
 
-    const sun = new THREE.DirectionalLight("#fff3d9", 2.35);
-    sun.position.set(24, 44, 12);
+    const sun = new THREE.DirectionalLight("#fff3d9", 2.5);
+    sun.position.set(0, 44, 0);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.left = -60;
     sun.shadow.camera.right = 60;
     sun.shadow.camera.top = 60;
     sun.shadow.camera.bottom = -60;
+    sun.shadow.bias = -0.0001;
     this.scene.add(sun);
 
-    const fill = new THREE.DirectionalLight("#47c8ff", 0.75);
-    fill.position.set(-16, 18, -20);
+    const fill = new THREE.DirectionalLight("#47c8ff", 0.6);
+    fill.position.set(0, 18, 0);
     this.scene.add(fill);
   }
 
   private clearWorldRoot() {
+    // Clean up destruction effects
+    if (this.destructionEffects) {
+      this.destructionEffects.dispose();
+    }
+
     for (let i = this.worldRoot.children.length - 1; i >= 0; i -= 1) {
       const child = this.worldRoot.children[i];
       this.worldRoot.remove(child);
@@ -232,8 +258,11 @@ export class Game {
     this.projectiles.length = 0;
     this.obstacles.length = 0;
     this.enemyTanks.length = 0;
-    this.pickupAnchor.clear();
-    this.pickupAnchor.visible = false;
+
+    for (const anchor of this.pickupAnchors) {
+      this.scene.remove(anchor);
+    }
+    this.pickupAnchors.length = 0;
   }
 
   private createTank(team: Team, spawn: GridCell) {
@@ -244,12 +273,48 @@ export class Game {
     const root = new THREE.Group();
     root.position.copy(worldFromCell(spawn));
 
-    const visual = this.assets.tank.clone(true);
-    const hull = visual.getObjectByName("Object001");
-    const turret = visual.getObjectByName("Object002");
+    let visual: THREE.Group;
+    let mixer: THREE.AnimationMixer | undefined;
+    let maxSpeed: number;
+    let fireCooldown: number;
+    let health: number;
 
-    if (!hull || !turret) {
-      throw new Error("Tank asset is missing expected hull/turret nodes.");
+    if (team === "player") {
+      visual = this.assets.playerTank.clone(true);
+      maxSpeed = PLAYER_MAX_SPEED;
+      fireCooldown = 0;
+      health = 224; // 140 * 1.6
+    } else if (team === "robot") {
+      visual = SkeletonUtils.clone(this.assets.walkingRobot) as THREE.Group;
+      mixer = new THREE.AnimationMixer(visual);
+
+      // Play walking animation
+      const animations = this.assets.walkingRobot.userData.animations;
+      if (animations?.length > 0) {
+        const action = mixer.clipAction(animations[0]);
+        action.play();
+      }
+
+      maxSpeed = ROBOT_MAX_SPEED;
+      fireCooldown = 1.5;
+      health = 60;
+    } else {
+      visual = this.assets.enemyTank.clone(true);
+
+      // Ensure enemy tank materials are properly cloned
+      visual.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          if (Array.isArray(node.material)) {
+            node.material = node.material.map(m => m.clone());
+          } else {
+            node.material = node.material.clone();
+          }
+        }
+      });
+
+      maxSpeed = ENEMY_MAX_SPEED;
+      fireCooldown = 1;
+      health = 100;
     }
 
     root.add(visual);
@@ -259,37 +324,24 @@ export class Game {
       team,
       root,
       visual,
-      hull,
-      turret,
-      hullBaseQuaternion: hull.quaternion.clone(),
-      turretBaseQuaternion: turret.quaternion.clone(),
       bodyHeading: Math.PI,
-      turretHeading: Math.PI,
+      aimHeading: Math.PI,
       velocity: new THREE.Vector3(),
-      maxSpeed: team === "player" ? PLAYER_MAX_SPEED : ENEMY_MAX_SPEED,
-      fireCooldown: team === "player" ? 0 : 1,
-      health: 100,
+      maxSpeed,
+      fireCooldown,
+      health,
       alive: true,
-      radius: 1.05,
+      radius: team === "robot" ? 0.8 : 1.05,
       path: [],
       repathTimer: 0,
       lastTargetCell: "",
       strafeDirection: Math.random() > 0.5 ? 1 : -1,
+      mixer,
     } satisfies TankActor;
   }
 
   private updateTankVisual(tank: TankActor) {
-    const hullRotation = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      tank.bodyHeading,
-    );
-    const turretRotation = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      tank.turretHeading,
-    );
-
-    tank.hull.quaternion.copy(tank.hullBaseQuaternion).multiply(hullRotation);
-    tank.turret.quaternion.copy(tank.turretBaseQuaternion).multiply(turretRotation);
+    tank.root.rotation.y = tank.bodyHeading;
   }
 
   private collidesWithArena(position: THREE.Vector3, radius: number) {
@@ -337,31 +389,40 @@ export class Game {
     return this.walkableCells[Math.floor(Math.random() * this.walkableCells.length)];
   }
 
-  private placePickup() {
-    let candidate = this.sampleWalkableCell();
+  private placePickups() {
+    // Place 3 glyphs randomly on the map
+    for (let i = 0; i < 3; i++) {
+      let candidate = this.sampleWalkableCell();
 
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      const next = this.sampleWalkableCell();
-      if (
-        Math.abs(next.col - cellFromWorld(this.playerTank.root.position).col) +
-          Math.abs(next.row - cellFromWorld(this.playerTank.root.position).row) >
-        7
-      ) {
-        candidate = next;
-        break;
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        const next = this.sampleWalkableCell();
+        if (
+          Math.abs(next.col - cellFromWorld(this.playerTank.root.position).col) +
+            Math.abs(next.row - cellFromWorld(this.playerTank.root.position).row) >
+          7
+        ) {
+          candidate = next;
+          break;
+        }
       }
-    }
 
-    this.pickupAnchor.position.copy(worldFromCell(candidate));
-    this.pickupAnchor.position.y = 0.5;
-    this.pickupAnchor.visible = true;
-    this.pickupActive = true;
+      const pickupAnchor = new THREE.Group();
+      const pickupVisual = this.assets!.glyph.clone(true);
+      pickupVisual.rotation.x = -Math.PI / 2; // Flip 90 degrees to lay flat
+      pickupAnchor.add(pickupVisual);
+      pickupAnchor.position.copy(worldFromCell(candidate));
+      pickupAnchor.position.y = 0.02;
+      pickupAnchor.userData.active = true;
+      this.scene.add(pickupAnchor);
+      this.pickupAnchors.push(pickupAnchor);
+    }
   }
 
   private fireProjectile(tank: TankActor, color: string) {
-    const direction = forwardFromHeading(tank.turretHeading).normalize();
-    const spawn = tank.root.position.clone().add(direction.clone().multiplyScalar(1.55));
-    spawn.y = 0.78;
+    const direction = forwardFromHeading(tank.aimHeading).normalize();
+    const spawnDistance = tank.team === "robot" ? 1.0 : 1.55;
+    const spawn = tank.root.position.clone().add(direction.clone().multiplyScalar(spawnDistance));
+    spawn.y = tank.team === "robot" ? 1.2 : 0.78;
 
     const shell = new THREE.Mesh(
       new THREE.SphereGeometry(0.17, 10, 10),
@@ -380,10 +441,10 @@ export class Game {
       velocity: direction.multiplyScalar(SHELL_SPEED),
       ttl: 2.3,
       owner: tank.team,
-      damage: 22,
+      damage: tank.team === "robot" ? 15 : tank.team === "player" ? 35 : 22,
     });
 
-    tank.fireCooldown = tank.team === "player" ? 0.18 : 0.95;
+    tank.fireCooldown = tank.team === "player" ? 0.18 : tank.team === "robot" ? 1.5 : 0.95;
     this.audio.onShot();
   }
 
@@ -400,11 +461,21 @@ export class Game {
 
     if (target.health <= 0 && target.alive) {
       target.alive = false;
+
+      // Create explosion and burning wreck
+      const position = new THREE.Vector3();
+      target.root.getWorldPosition(position);
+      this.destructionEffects.createExplosion(position);
+      this.destructionEffects.createBurningWreck(target.visual, position);
+
       target.root.visible = false;
 
       if (target.team === "enemy") {
         this.score += 120;
         this.hud.setStatus("Enemy tank destroyed.");
+      } else if (target.team === "robot") {
+        this.score += 80;
+        this.hud.setStatus("Robot destroyed.");
       } else {
         this.matchRunning = false;
         this.hud.showLoseScreen(this.score);
@@ -418,42 +489,78 @@ export class Game {
   }
 
   private updatePlayer(delta: number) {
-    const input = new THREE.Vector3(
-      Number(this.pressed.has("KeyD")) - Number(this.pressed.has("KeyA")),
-      0,
-      Number(this.pressed.has("KeyS")) - Number(this.pressed.has("KeyW")),
-    );
-
-    const desiredVelocity = new THREE.Vector3();
-    if (input.lengthSq() > 0) {
-      input.normalize();
-      desiredVelocity.copy(input).multiplyScalar(this.playerTank.maxSpeed);
-    }
-
-    approachVector(
-      this.playerTank.velocity,
-      desiredVelocity,
-      delta,
-      input.lengthSq() > 0 ? 10 : 6,
-    );
-    this.tryMoveTank(this.playerTank, this.playerTank.velocity.clone().multiplyScalar(delta));
-
-    if (this.playerTank.velocity.lengthSq() > 0.2) {
-      this.playerTank.bodyHeading = angleLerp(
-        this.playerTank.bodyHeading,
-        Math.atan2(this.playerTank.velocity.x, this.playerTank.velocity.z),
-        1 - Math.exp(-delta * 10),
+    if (this.cameraMode === "topdown") {
+      // Top-down controls: WASD for movement, mouse for aim
+      const input = new THREE.Vector3(
+        Number(this.pressed.has("KeyD")) - Number(this.pressed.has("KeyA")),
+        0,
+        Number(this.pressed.has("KeyS")) - Number(this.pressed.has("KeyW")),
       );
-    }
 
-    this.playerTank.turretHeading = Math.atan2(
-      this.pointerWorld.x - this.playerTank.root.position.x,
-      this.pointerWorld.z - this.playerTank.root.position.z,
-    );
+      const desiredVelocity = new THREE.Vector3();
+      if (input.lengthSq() > 0) {
+        input.normalize();
+        desiredVelocity.copy(input).multiplyScalar(this.playerTank.maxSpeed);
+      }
+
+      approachVector(
+        this.playerTank.velocity,
+        desiredVelocity,
+        delta,
+        input.lengthSq() > 0 ? 10 : 6,
+      );
+      this.tryMoveTank(this.playerTank, this.playerTank.velocity.clone().multiplyScalar(delta));
+
+      if (this.playerTank.velocity.lengthSq() > 0.2) {
+        this.playerTank.bodyHeading = angleLerp(
+          this.playerTank.bodyHeading,
+          Math.atan2(this.playerTank.velocity.x, this.playerTank.velocity.z),
+          1 - Math.exp(-delta * 10),
+        );
+      }
+
+      this.playerTank.aimHeading = Math.atan2(
+        this.pointerWorld.x - this.playerTank.root.position.x,
+        this.pointerWorld.z - this.playerTank.root.position.z,
+      );
+    } else {
+      // Third-person controls: W forward, S backward, A/D rotate
+      const turnSpeed = 1.2;
+      const moveSpeed = this.playerTank.maxSpeed;
+
+      // Rotation
+      if (this.pressed.has("KeyA")) {
+        this.playerTank.bodyHeading += turnSpeed * delta;
+      }
+      if (this.pressed.has("KeyD")) {
+        this.playerTank.bodyHeading -= turnSpeed * delta;
+      }
+
+      // Forward/backward movement
+      const forward = forwardFromHeading(this.playerTank.bodyHeading);
+      const desiredVelocity = new THREE.Vector3();
+
+      if (this.pressed.has("KeyW")) {
+        desiredVelocity.copy(forward).multiplyScalar(moveSpeed);
+      } else if (this.pressed.has("KeyS")) {
+        desiredVelocity.copy(forward).multiplyScalar(-moveSpeed * 0.7);
+      }
+
+      approachVector(
+        this.playerTank.velocity,
+        desiredVelocity,
+        delta,
+        desiredVelocity.lengthSq() > 0 ? 10 : 6,
+      );
+      this.tryMoveTank(this.playerTank, this.playerTank.velocity.clone().multiplyScalar(delta));
+
+      // Aim always forward in third-person
+      this.playerTank.aimHeading = this.playerTank.bodyHeading;
+    }
 
     this.playerTank.fireCooldown = Math.max(0, this.playerTank.fireCooldown - delta);
     if ((this.fireQueued || this.pressed.has("Space")) && this.playerTank.fireCooldown <= 0) {
-      this.fireProjectile(this.playerTank, "#76f2ff");
+      this.fireProjectile(this.playerTank, "#00ff00");
     }
 
     this.updateTankVisual(this.playerTank);
@@ -555,23 +662,20 @@ export class Game {
       );
     }
 
-    enemy.turretHeading = angleLerp(
-      enemy.turretHeading,
-      Math.atan2(toPlayer.x, toPlayer.z),
-      1 - Math.exp(-delta * 11),
-    );
+    enemy.aimHeading = Math.atan2(toPlayer.x, toPlayer.z);
 
     enemy.fireCooldown = Math.max(0, enemy.fireCooldown - delta);
     const targetAngle = Math.atan2(toPlayer.x, toPlayer.z);
     const aimError = Math.abs(
       Math.atan2(
-        Math.sin(enemy.turretHeading - targetAngle),
-        Math.cos(enemy.turretHeading - targetAngle),
+        Math.sin(enemy.aimHeading - targetAngle),
+        Math.cos(enemy.aimHeading - targetAngle),
       ),
     );
 
     if (hasLineOfSight && distanceToPlayer < 26 && enemy.fireCooldown <= 0 && aimError < 0.14) {
-      this.fireProjectile(enemy, "#ff9e73");
+      const color = enemy.team === "robot" ? "#ffff00" : "#ff0000";
+      this.fireProjectile(enemy, color);
     }
 
     this.updateTankVisual(enemy);
@@ -596,6 +700,31 @@ export class Game {
 
       if (this.obstacles.some((obstacle) => obstacle.bounds.containsPoint(projectile.mesh.position))) {
         this.removeProjectileAt(index);
+        continue;
+      }
+
+      // Check destructible obstacles
+      let hitObstacle = false;
+      for (let i = this.obstacles.length - 1; i >= 0; i--) {
+        const obstacle = this.obstacles[i];
+        if (obstacle.bounds.containsPoint(projectile.mesh.position)) {
+          if (obstacle.destructible && obstacle.health !== undefined) {
+            obstacle.health -= projectile.damage;
+            if (obstacle.health <= 0) {
+              if (obstacle.visual) {
+                this.worldRoot.remove(obstacle.visual);
+              }
+              this.obstacles.splice(i, 1);
+              this.audio.onHit();
+            }
+          }
+          this.removeProjectileAt(index);
+          hitObstacle = true;
+          break;
+        }
+      }
+
+      if (hitObstacle) {
         continue;
       }
 
@@ -625,25 +754,17 @@ export class Game {
   }
 
   private updatePickup(delta: number) {
-    this.pickupAnchor.rotation.y += delta * 1.5;
-    this.pickupAnchor.position.y = 0.55 + Math.sin(this.clock.getElapsedTime() * 2) * 0.16;
+    for (const anchor of this.pickupAnchors) {
+      if (!anchor.userData.active) continue;
 
-    if (!this.pickupActive) {
-      this.pickupCooldown -= delta;
-      if (this.pickupCooldown <= 0 && this.playerTank.alive) {
-        this.placePickup();
+      if (this.playerTank.root.position.distanceTo(anchor.position) < 2.5) {
+        anchor.userData.active = false;
+        anchor.visible = false;
+        this.playerTank.health = Math.min(100, this.playerTank.health + 32);
+        this.score += 35;
+        this.audio.onPickup();
+        this.hud.setStatus("Glyph captured. Armor restored.");
       }
-      return;
-    }
-
-    if (this.playerTank.root.position.distanceTo(this.pickupAnchor.position) < 1.8) {
-      this.pickupActive = false;
-      this.pickupAnchor.visible = false;
-      this.pickupCooldown = PICKUP_RESPAWN_TIME;
-      this.playerTank.health = Math.min(100, this.playerTank.health + 32);
-      this.score += 35;
-      this.audio.onPickup();
-      this.hud.setStatus("Glyph captured. Armor restored.");
     }
   }
 
@@ -652,9 +773,43 @@ export class Game {
     desiredFocus.y = 0;
     approachVector(this.cameraFocus, desiredFocus, delta, 7);
 
-    this.camera.position.set(this.cameraFocus.x, CAMERA_HEIGHT, this.cameraFocus.z);
-    this.camera.lookAt(this.cameraFocus.x, 0, this.cameraFocus.z);
-    this.reticle.position.set(this.pointerWorld.x, 0.08, this.pointerWorld.z);
+    if (this.cameraMode === "topdown") {
+      // Top-down view
+      this.orthoCam.position.set(this.cameraFocus.x, CAMERA_HEIGHT, this.cameraFocus.z);
+      this.orthoCam.lookAt(this.cameraFocus.x, 0, this.cameraFocus.z);
+      this.reticle.visible = true;
+      this.reticle.position.set(this.pointerWorld.x, 0.08, this.pointerWorld.z);
+    } else {
+      // Third-person view - smooth camera rotation following tank
+      const distance = 15;
+      const height = 8;
+      const smoothFactor = 1 - Math.exp(-delta * 0.7); // ~1.5 second smooth follow
+
+      // Calculate desired camera angle based on tank rotation
+      const desiredCameraAngle = this.playerTank.bodyHeading;
+
+      // Smoothly interpolate current camera angle toward desired angle
+      if (!this.cameraAngle) {
+        this.cameraAngle = desiredCameraAngle;
+      }
+
+      const angleDelta = Math.atan2(
+        Math.sin(desiredCameraAngle - this.cameraAngle),
+        Math.cos(desiredCameraAngle - this.cameraAngle)
+      );
+      this.cameraAngle += angleDelta * smoothFactor;
+
+      const offsetX = -Math.sin(this.cameraAngle) * distance;
+      const offsetZ = -Math.cos(this.cameraAngle) * distance;
+
+      this.perspCam.position.set(
+        this.cameraFocus.x + offsetX,
+        height,
+        this.cameraFocus.z + offsetZ
+      );
+      this.perspCam.lookAt(this.cameraFocus.x, 0, this.cameraFocus.z);
+      this.reticle.visible = false;
+    }
   }
 
   private updateHud() {
@@ -663,8 +818,8 @@ export class Game {
     this.hud.setScore(this.score);
     this.hud.setEnemies(enemiesAlive);
     this.hud.setObjective(
-      this.pickupActive
-        ? "Capture the glyph for emergency repair"
+      this.pickupAnchors.some(a => a.userData.active)
+        ? "Capture glyphs for emergency repair"
         : "Sweep the arena and hold position",
     );
   }
@@ -677,8 +832,8 @@ export class Game {
 
     const enemiesAlive = this.enemyTanks.filter((enemy) => enemy.alive).length;
     if (enemiesAlive === 0) {
-      this.hud.setStatus("Arena cleared.");
       this.matchRunning = false;
+      this.hud.showWinScreen(this.score);
       return;
     }
 
@@ -690,11 +845,14 @@ export class Game {
     const height = this.viewport.clientHeight;
     const aspect = width / Math.max(height, 1);
 
-    this.camera.left = -CAMERA_HALF_HEIGHT * aspect;
-    this.camera.right = CAMERA_HALF_HEIGHT * aspect;
-    this.camera.top = CAMERA_HALF_HEIGHT;
-    this.camera.bottom = -CAMERA_HALF_HEIGHT;
-    this.camera.updateProjectionMatrix();
+    this.orthoCam.left = -CAMERA_HALF_HEIGHT * aspect;
+    this.orthoCam.right = CAMERA_HALF_HEIGHT * aspect;
+    this.orthoCam.top = CAMERA_HALF_HEIGHT;
+    this.orthoCam.bottom = -CAMERA_HALF_HEIGHT;
+    this.orthoCam.updateProjectionMatrix();
+
+    this.perspCam.aspect = aspect;
+    this.perspCam.updateProjectionMatrix();
 
     this.renderer.setSize(width, height, false);
   }
@@ -702,18 +860,26 @@ export class Game {
   private animate = () => {
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
-    if (this.matchRunning && this.playerTank.alive) {
+    if (this.matchRunning && this.playerTank && this.playerTank.alive) {
       this.acquirePointerWorld();
       this.updatePlayer(delta);
       for (const enemy of this.enemyTanks) {
         this.updateEnemy(enemy, delta);
+        if (enemy.mixer) {
+          enemy.mixer.update(delta);
+        }
       }
       this.updateProjectiles(delta);
       this.updatePickup(delta);
+      this.updateCamera(delta);
     }
 
-    if (this.assets) {
-      this.updateCamera(delta);
+    // Update destruction effects
+    if (this.destructionEffects) {
+      this.destructionEffects.update(delta);
+    }
+
+    if (this.assets && this.playerTank) {
       this.updateStatusLine();
       this.updateHud();
     }
@@ -729,16 +895,16 @@ export class Game {
     }
 
     this.hud.hideLoseScreen();
-    this.hud.startIntro();
+    this.hud.hideWinScreen();
     this.clearWorldRoot();
+
+    // Initialize destruction effects system
+    this.destructionEffects = new DestructionEffects(this.worldRoot, this.assets);
 
     const layout = generateLayout();
     this.blockedGrid = layout.blocked;
     this.walkableCells = layout.walkable;
     this.obstacles.push(...buildArenaScene(this.worldRoot, this.scene, this.assets, layout));
-
-    const pickupVisual = this.assets.glyph.clone(true);
-    this.pickupAnchor.add(pickupVisual);
 
     this.playerTank = this.createTank("player", layout.playerSpawn);
     this.updateTankVisual(this.playerTank);
@@ -746,15 +912,44 @@ export class Game {
     for (const spawn of layout.enemySpawns) {
       const enemy = this.createTank("enemy", spawn);
       enemy.bodyHeading = 0;
-      enemy.turretHeading = 0;
+      enemy.aimHeading = 0;
       this.updateTankVisual(enemy);
       this.enemyTanks.push(enemy);
+    }
+
+    // Spawn 3 robots at random walkable positions far from player
+    const spawnedPositions: THREE.Vector3[] = [];
+    for (let i = 0; i < 3; i++) {
+      let robotSpawn;
+      let attempts = 0;
+
+      // Find spawn position far from player and other robots
+      do {
+        robotSpawn = this.walkableCells[Math.floor(Math.random() * this.walkableCells.length)];
+        const spawnPos = worldFromCell(robotSpawn);
+
+        // Check distance from player
+        const distFromPlayer = spawnPos.distanceTo(worldFromCell(layout.playerSpawn));
+
+        // Check distance from other robots
+        const tooClose = spawnedPositions.some(pos => pos.distanceTo(spawnPos) < 10);
+
+        if (distFromPlayer > 15 && !tooClose) break;
+        attempts++;
+      } while (attempts < 50);
+
+      const robot = this.createTank("robot", robotSpawn);
+      robot.bodyHeading = Math.random() * Math.PI * 2;
+      robot.aimHeading = robot.bodyHeading;
+      this.updateTankVisual(robot);
+      this.enemyTanks.push(robot);
+      spawnedPositions.push(worldFromCell(robotSpawn));
     }
 
     this.score = 0;
     this.pickupCooldown = 0;
     this.pickupActive = false;
-    this.placePickup();
+    this.placePickups();
     this.matchRunning = true;
     this.resize();
     this.hud.setStatus("Arena ready.");

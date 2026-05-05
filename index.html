@@ -20,6 +20,14 @@
           <p class="intro-controls">WASD move</p>
           <p class="intro-controls">Mouse aim</p>
           <p class="intro-controls">Click / Space fire</p>
+
+          <div class="camera-mode-selector">
+            <p class="mode-label">Camera Mode:</p>
+            <button id="mode-topdown" class="mode-button active">Top-Down</button>
+            <button id="mode-thirdperson" class="mode-button">Third-Person</button>
+          </div>
+
+          <button id="start-button" class="start-button">Start Game</button>
         </div>
       </div>
 
@@ -52,6 +60,16 @@
           <h2>You Lost</h2>
           <p>Reset the arena and go again.</p>
           <button id="retry-button" type="button">Retry</button>
+        </div>
+      </div>
+
+      <div id="win-screen" class="lose-screen">
+        <canvas id="confetti-canvas"></canvas>
+        <div class="lose-card">
+          <p class="lose-kicker">Victory</p>
+          <h2>Arena Cleared!</h2>
+          <p>All enemies destroyed.</p>
+          <button id="win-retry-button" type="button">Play Again</button>
         </div>
       </div>
     </div>
