@@ -5,7 +5,6 @@ import {
   CAMERA_HEIGHT,
   ENEMY_MAX_SPEED,
   MAP_HALF,
-  PICKUP_RESPAWN_TIME,
   PLAYER_MAX_SPEED,
   ROBOT_MAX_SPEED,
   SHELL_SPEED,
@@ -45,6 +44,12 @@ type TankActor = {
   lastTargetCell: string;
   strafeDirection: number;
   mixer?: THREE.AnimationMixer;
+};
+
+const projectileMuzzleOffsets: Record<Team, { forward: number; height: number }> = {
+  player: { forward: 2.15, height: 1.1 },
+  enemy: { forward: 1.55, height: 0.78 },
+  robot: { forward: 1.0, height: 1.2 },
 };
 
 class AudioBridge {
@@ -140,8 +145,6 @@ export class Game {
   private playerTank!: TankActor;
   private destructionEffects!: DestructionEffects;
   private score = 0;
-  private pickupCooldown = 0;
-  private pickupActive = false;
   private fireQueued = false;
   private matchRunning = false;
   private cameraMode: "topdown" | "thirdperson" = "topdown";
@@ -420,9 +423,9 @@ export class Game {
 
   private fireProjectile(tank: TankActor, color: string) {
     const direction = forwardFromHeading(tank.aimHeading).normalize();
-    const spawnDistance = tank.team === "robot" ? 1.0 : 1.55;
-    const spawn = tank.root.position.clone().add(direction.clone().multiplyScalar(spawnDistance));
-    spawn.y = tank.team === "robot" ? 1.2 : 0.78;
+    const muzzleOffset = projectileMuzzleOffsets[tank.team];
+    const spawn = tank.root.position.clone().add(direction.clone().multiplyScalar(muzzleOffset.forward));
+    spawn.y = muzzleOffset.height;
 
     const shell = new THREE.Mesh(
       new THREE.SphereGeometry(0.17, 10, 10),
@@ -466,7 +469,7 @@ export class Game {
       const position = new THREE.Vector3();
       target.root.getWorldPosition(position);
       this.destructionEffects.createExplosion(position);
-      this.destructionEffects.createBurningWreck(target.visual, position);
+      this.destructionEffects.createBurningWreck(position);
 
       target.root.visible = false;
 
@@ -698,11 +701,6 @@ export class Game {
         continue;
       }
 
-      if (this.obstacles.some((obstacle) => obstacle.bounds.containsPoint(projectile.mesh.position))) {
-        this.removeProjectileAt(index);
-        continue;
-      }
-
       // Check destructible obstacles
       let hitObstacle = false;
       for (let i = this.obstacles.length - 1; i >= 0; i--) {
@@ -718,6 +716,7 @@ export class Game {
               this.audio.onHit();
             }
           }
+          this.destructionEffects.createImpact(projectile.mesh.position, 0xffc46a);
           this.removeProjectileAt(index);
           hitObstacle = true;
           break;
@@ -739,6 +738,7 @@ export class Game {
         targetPoint.copy(target.root.position);
         targetPoint.y = projectile.mesh.position.y;
         if (targetPoint.distanceTo(projectile.mesh.position) < target.radius + 0.25) {
+          this.destructionEffects.createImpact(projectile.mesh.position, 0xfff0a8);
           this.damageTank(target, projectile.damage);
           this.audio.onHit();
           this.removeProjectileAt(index);
@@ -753,7 +753,7 @@ export class Game {
     }
   }
 
-  private updatePickup(delta: number) {
+  private updatePickup() {
     for (const anchor of this.pickupAnchors) {
       if (!anchor.userData.active) continue;
 
@@ -870,7 +870,7 @@ export class Game {
         }
       }
       this.updateProjectiles(delta);
-      this.updatePickup(delta);
+      this.updatePickup();
       this.updateCamera(delta);
     }
 
@@ -947,8 +947,6 @@ export class Game {
     }
 
     this.score = 0;
-    this.pickupCooldown = 0;
-    this.pickupActive = false;
     this.placePickups();
     this.matchRunning = true;
     this.resize();

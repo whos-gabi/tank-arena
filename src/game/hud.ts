@@ -19,16 +19,6 @@ type HudRefs = {
 
 export class HUD {
   private readonly refs: HudRefs;
-  private introTimer: number | undefined;
-  private confettiParticles: Array<{
-    x: number;
-    y: number;
-    vx: number;
-    vy: number;
-    color: string;
-    rotation: number;
-    rotationSpeed: number;
-  }> = [];
   private confettiAnimationId: number | null = null;
   private onStartCallback: ((mode: "topdown" | "thirdperson") => void) | null = null;
   private selectedMode: "topdown" | "thirdperson" = "topdown";
@@ -243,8 +233,6 @@ export class HUD {
       cancelAnimationFrame(this.confettiAnimationId);
       this.confettiAnimationId = null;
     }
-    this.confettiParticles = [];
-
     const ctx = this.refs.confettiCanvas.getContext("2d");
     if (ctx) {
       ctx.clearRect(0, 0, this.refs.confettiCanvas.width, this.refs.confettiCanvas.height);

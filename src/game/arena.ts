@@ -1,11 +1,10 @@
 import * as THREE from "three";
-import { GRID_SIZE, MAP_HALF, CELL_SIZE } from "./config";
+import { GRID_SIZE, CELL_SIZE } from "./config";
 import { Assets } from "./assets";
 import {
   GridCell,
   createGridValue,
   gridDistance,
-  inBounds,
   keyOf,
   neighbors4,
   worldFromCell,
@@ -22,6 +21,7 @@ export type Obstacle = {
 
 export type ArenaLayout = {
   blocked: boolean[][];
+  wallRotations: Array<Array<number | null>>;
   walkable: GridCell[];
   playerSpawn: GridCell;
   enemySpawns: GridCell[];
@@ -48,34 +48,63 @@ function floodReachable(start: GridCell, blocked: boolean[][]) {
   return visited;
 }
 
-function reserveCells(center: GridCell, radius: number, set: Set<string>) {
-  for (let dc = -radius; dc <= radius; dc += 1) {
-    for (let dr = -radius; dr <= radius; dr += 1) {
-      const cell = {
-        col: center.col + dc,
-        row: center.row + dr,
-      };
-      if (inBounds(cell)) {
-        set.add(keyOf(cell));
-      }
-    }
-  }
-}
+function createInteriorWallRuns(blocked: boolean[][], wallRotations: Array<Array<number | null>>) {
+  const wallRunCount = THREE.MathUtils.randInt(5, 8);
+  let placedRuns = 0;
 
-function rotatePattern(pattern: GridCell[], turns: number) {
-  let rotated = pattern.map((cell) => ({ ...cell }));
-  for (let step = 0; step < turns; step += 1) {
-    rotated = rotated.map((cell) => ({
-      col: -cell.row,
-      row: cell.col,
-    }));
+  for (let attempt = 0; attempt < 80 && placedRuns < wallRunCount; attempt += 1) {
+    const horizontal = Math.random() < 0.5;
+    const length = THREE.MathUtils.randInt(2, 5);
+    const startCol = THREE.MathUtils.randInt(3, GRID_SIZE - 4 - (horizontal ? length : 0));
+    const startRow = THREE.MathUtils.randInt(3, GRID_SIZE - 4 - (horizontal ? 0 : length));
+    const gapIndex = length >= 4 && Math.random() < 0.35
+      ? THREE.MathUtils.randInt(1, length - 2)
+      : -1;
+
+    const cells: GridCell[] = [];
+    for (let step = 0; step < length; step += 1) {
+      if (step === gapIndex) {
+        continue;
+      }
+
+      cells.push({
+        col: startCol + (horizontal ? step : 0),
+        row: startRow + (horizontal ? 0 : step),
+      });
+    }
+
+    if (
+      cells.length < 2 ||
+      cells.some((cell) => blocked[cell.row][cell.col]) ||
+      cells.some((cell) => {
+        for (let dr = -1; dr <= 1; dr += 1) {
+          for (let dc = -1; dc <= 1; dc += 1) {
+            const row = cell.row + dr;
+            const col = cell.col + dc;
+            if (row >= 1 && row < GRID_SIZE - 1 && col >= 1 && col < GRID_SIZE - 1 && blocked[row][col]) {
+              return true;
+            }
+          }
+        }
+        return false;
+      })
+    ) {
+      continue;
+    }
+
+    const rotation = horizontal ? 0 : Math.PI / 2;
+    for (const cell of cells) {
+      blocked[cell.row][cell.col] = true;
+      wallRotations[cell.row][cell.col] = rotation;
+    }
+    placedRuns += 1;
   }
-  return rotated;
 }
 
 export function generateLayout() {
   const center = Math.floor(GRID_SIZE / 2);
   const blocked = createGridValue(() => false);
+  const wallRotations = createGridValue<number | null>(() => null);
 
   // Mark all border cells as blocked for walls
   for (let col = 0; col < GRID_SIZE; col += 1) {
@@ -110,8 +139,10 @@ export function generateLayout() {
     }
   }
 
+  createInteriorWallRuns(blocked, wallRotations);
+
   // Place sparse random obstacles (10-18 clusters)
-  const numClusters = THREE.MathUtils.randInt(10, 18);
+  const numClusters = THREE.MathUtils.randInt(12, 20);
 
   for (let i = 0; i < numClusters; i++) {
     const centerCol = THREE.MathUtils.randInt(4, GRID_SIZE - 5);
@@ -164,6 +195,7 @@ export function generateLayout() {
       const c = playerSpawn.col + dc;
       if (r > 0 && r < GRID_SIZE - 1 && c > 0 && c < GRID_SIZE - 1) {
         blocked[r][c] = false;
+        wallRotations[r][c] = null;
       }
     }
   }
@@ -209,6 +241,7 @@ export function generateLayout() {
 
   return {
     blocked,
+    wallRotations,
     walkable: walkable2,
     playerSpawn,
     enemySpawns,
@@ -234,6 +267,9 @@ export function buildArenaScene(
       const floorTile = assets.stoneFloor.clone(true);
       floorTile.position.copy(center);
       floorTile.position.y = -0.05;
+      floorTile.rotation.y = THREE.MathUtils.randInt(0, 3) * (Math.PI / 2);
+      floorTile.scale.x *= Math.random() < 0.5 ? -1 : 1;
+      floorTile.scale.z *= Math.random() < 0.5 ? -1 : 1;
       floorTile.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           child.receiveShadow = true;
@@ -316,6 +352,33 @@ export function buildArenaScene(
 
       // Interior obstacles
       if (!layout.blocked[row][col]) {
+        continue;
+      }
+
+      const wallRotation = layout.wallRotations[row][col];
+      if (wallRotation !== null) {
+        const wall = assets.damagedWall.clone(true);
+        wall.position.copy(center);
+        wall.rotation.y = wallRotation;
+        worldRoot.add(wall);
+
+        obstacles.push({
+          bounds: new THREE.Box3(
+            new THREE.Vector3(
+              center.x - CELL_SIZE * 0.48,
+              0,
+              center.z - CELL_SIZE * 0.48
+            ),
+            new THREE.Vector3(
+              center.x + CELL_SIZE * 0.48,
+              obstacleHeight,
+              center.z + CELL_SIZE * 0.48
+            )
+          ),
+          center,
+          visual: wall,
+          type: 'wall',
+        });
         continue;
       }
 
